@@ -51,7 +51,7 @@ function pcmToWavBlob(base64Pcm, sampleRate = 24000) {
 
 const CSS = `
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; }
+html, body, #root { width: 100%; min-height: 100%; }
 
 :root {
   --bg-dark: #546af6;
@@ -66,8 +66,11 @@ html, body { width: 100%; height: 100%; }
   --glow-2: rgba(179, 102, 255, 0.15);
 }
 
+html, body, #root {
+  background: linear-gradient(135deg, #111637 0%, #25174d 50%, #171c39 100%);
+}
+
 body {
-  background: linear-gradient(135deg, #0a0e27 0%, #1a0f3d 50%, #0f1428 100%);
   color: var(--text);
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
@@ -79,7 +82,7 @@ body {
   background: 
     radial-gradient(ellipse 800px 600px at 10% 20%, rgba(0, 217, 255, 0.08), transparent 60%),
     radial-gradient(ellipse 900px 500px at 95% 80%, rgba(179, 102, 255, 0.06), transparent 50%),
-    linear-gradient(135deg, #0a0e27 0%, #1a0f3d 50%, #0f1428 100%);
+    linear-gradient(135deg, #111637 0%, #25174d 50%, #171c39 100%);
 }
 
 .shell { max-width: 1400px; margin: 0 auto; }
@@ -299,6 +302,29 @@ textarea.editor:focus {
 
 .btn-block { width: 100%; }
 
+.input-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.recording-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #ff8f9b;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.recording-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6464;
+  box-shadow: 0 0 10px rgba(255, 100, 100, 0.8);
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
 .error-box {
   background: rgba(255, 100, 100, 0.1);
   border: 1px solid rgba(255, 100, 100, 0.3);
@@ -471,11 +497,55 @@ export default function VoicePostPro() {
   const [audioUrl, setAudioUrl] = useState(null);
 
   const [error, setError] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
   const audioRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const activeStyle = VOICE_STYLES.find((v) => v.id === styleId);
   const activeLanguage = LANGUAGES.find((l) => l.id === languageId);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+
+  useEffect(() => {
+    return () => recognitionRef.current?.stop();
+  }, []);
+
+  const toggleVoiceInput = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError("Voice input is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+
+    setError("");
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = activeLanguage.translate ? "en-US" : activeLanguage.code;
+    const startingText = text.trim();
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        transcript += event.results[i][0].transcript;
+      }
+      setText([startingText, transcript.trim()].filter(Boolean).join(startingText && transcript.trim() ? " " : ""));
+      setGrammarResult(null);
+      setAudioUrl(null);
+    };
+    recognition.onerror = (event) => {
+      if (event.error !== "aborted") setError(`Voice input error: ${event.error}.`);
+    };
+    recognition.onend = () => setIsRecording(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
 
   const callGemini = async (model, body) => {
     const res = await fetch(
@@ -616,10 +686,14 @@ Post:
                   placeholder="Write your caption, script, or post here..."
                 />
               </div>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div className="input-actions">
                 <button className="btn btn-primary" onClick={checkGrammar} disabled={checking}>
                   {checking ? "✓ Checking..." : "🔍 Check Grammar"}
                 </button>
+                <button className="btn btn-ghost" onClick={toggleVoiceInput} type="button">
+                  {isRecording ? "⏹ Stop recording" : "🎙️ Speak your caption"}
+                </button>
+                {isRecording && <span className="recording-status">Listening… speak now</span>}
               </div>
 
               {grammarResult && grammarResult.has_errors && (
