@@ -24,6 +24,7 @@ const SAMPLE_TEXTS = [
 
 const DEFAULT_TEXT_MODEL = "gemini-3.6-flash";
 const DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const MAX_TEXT_LENGTH = 2000;
 
 function pcmToWavBlob(base64Pcm, sampleRate = 24000) {
   const binary = atob(base64Pcm);
@@ -427,6 +428,7 @@ textarea.editor:focus {
 }
 
 .voice-card {
+  width: 100%;
   background: rgba(15, 20, 40, 0.8);
   border: 1px solid var(--border);
   padding: 0.9rem;
@@ -436,6 +438,8 @@ textarea.editor:focus {
   text-align: center;
   font-size: 0.9rem;
   font-weight: 600;
+  color: var(--text);
+  font-family: inherit;
 }
 .voice-card:hover { border-color: var(--accent-2); background: rgba(179, 102, 255, 0.1); }
 .voice-card.active {
@@ -452,6 +456,13 @@ textarea.editor:focus {
   margin-bottom: 1rem;
   border-radius: 10px;
   accent-color: var(--accent);
+}
+.generation-status {
+  margin-top: 12px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .toggle-group {
@@ -571,6 +582,7 @@ export default function VoicePostPro() {
 
   const [converting, setConverting] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [successPulse, setSuccessPulse] = useState(false);
 
   const [error, setError] = useState("");
@@ -579,6 +591,9 @@ export default function VoicePostPro() {
 
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
+  const recordingRef = useRef(false);
+  const checkGrammarRef = useRef(null);
+  const convertToVoiceRef = useRef(null);
 
   const activeStyle = VOICE_STYLES.find((v) => v.id === styleId);
   const activeLanguage = LANGUAGES.find((l) => l.id === languageId);
@@ -589,7 +604,13 @@ export default function VoicePostPro() {
     localStorage.setItem("voiceStudio_apiKey", apiKey);
   }, [apiKey]);
 
-  // Initialize speech recognition
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
+
+  // Initialize speech recognition once; its active state is held in a ref.
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -605,43 +626,60 @@ export default function VoicePostPro() {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) finalChunk += transcript + " ";
       }
-      if (finalChunk) setText((prev) => (prev + " " + finalChunk).trim());
+      if (finalChunk) {
+        setText((prev) => (prev + " " + finalChunk).trim().slice(0, MAX_TEXT_LENGTH));
+        setGrammarResult(null);
+        setAudioUrl(null);
+      }
     };
 
+    recognition.onerror = (event) => {
+      if (event.error !== "aborted") setError("Voice input could not start. Please allow microphone access and try again.");
+      recordingRef.current = false;
+      setIsRecording(false);
+    };
     recognition.onend = () => {
-      if (isRecording) {
-        try { recognition.start(); } catch (e) {}
+      if (recordingRef.current) {
+        try {
+          recognition.start();
+        } catch {
+          recordingRef.current = false;
+          setIsRecording(false);
+        }
       }
     };
 
     recognitionRef.current = recognition;
-    return () => { recognition.onend = null; recognition.stop(); };
-  }, [isRecording]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "g") {
-        e.preventDefault();
-        checkGrammar();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        e.preventDefault();
-        convertToVoice();
-      }
+    return () => {
+      recordingRef.current = false;
+      recognition.onend = null;
+      recognition.stop();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [text, apiKey, styleId, languageId, youthful]);
+  }, []);
 
   const toggleVoiceInput = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) {
+      setError("Voice input is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+
     if (isRecording) {
+      recordingRef.current = false;
       setIsRecording(false);
-      recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
+      recognition.stop();
     } else {
+      setError("");
+      recognition.lang = activeLanguage.translate ? "en-US" : activeLanguage.code;
+      recordingRef.current = true;
       setIsRecording(true);
-      try { recognitionRef.current.start(); } catch (e) {}
+      try {
+        recognition.start();
+      } catch {
+        recordingRef.current = false;
+        setIsRecording(false);
+        setError("Voice input is already starting. Please try again in a moment.");
+      }
     }
   };
 
@@ -654,6 +692,7 @@ export default function VoicePostPro() {
     setText("");
     setGrammarResult(null);
     setAudioUrl(null);
+    setAudioDuration(0);
     setError("");
   };
 
@@ -706,10 +745,20 @@ Post:
 
   const copyToClipboard = () => {
     if (grammarResult?.corrected_text) {
-      navigator.clipboard.writeText(grammarResult.corrected_text);
-      setCopyFeedback("✓ Copied to clipboard!");
-      setTimeout(() => setCopyFeedback(""), 2000);
+      navigator.clipboard.writeText(grammarResult.corrected_text)
+        .then(() => {
+          setCopyFeedback("✓ Copied to clipboard!");
+          setTimeout(() => setCopyFeedback(""), 2000);
+        })
+        .catch(() => setError("Could not copy the corrected text. Please copy it manually."));
     }
+  };
+
+  const formatDuration = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return "Ready to play";
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60).toString().padStart(2, "0");
+    return `${minutes}:${remainingSeconds}`;
   };
 
   const convertToVoice = async () => {
@@ -742,6 +791,7 @@ Post:
       if (!base64) throw new Error("No audio returned from the model.");
       const url = URL.createObjectURL(pcmToWavBlob(base64));
       setAudioUrl(url);
+      setAudioDuration(0);
       setSuccessPulse(true);
       setTimeout(() => setSuccessPulse(false), 600);
     } catch (e) {
@@ -750,6 +800,24 @@ Post:
       setConverting(false);
     }
   };
+
+  checkGrammarRef.current = checkGrammar;
+  convertToVoiceRef.current = convertToVoice;
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "g") {
+        event.preventDefault();
+        checkGrammarRef.current?.();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        convertToVoiceRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   return (
     <div className="app-container">
@@ -796,14 +864,17 @@ Post:
                 <span className="panel-meta">{wordCount} words</span>
               </div>
               <div className="editor-wrapper">
-                <span className="char-count">{text.length} chars</span>
+                <span className="char-count">{text.length} / {MAX_TEXT_LENGTH}</span>
                 <textarea
                   className="editor"
                   value={text}
+                  maxLength={MAX_TEXT_LENGTH}
+                  aria-label="Caption, script, or post text"
                   onChange={(e) => {
                     setText(e.target.value);
                     setGrammarResult(null);
                     setAudioUrl(null);
+                    setAudioDuration(0);
                   }}
                   placeholder="Write your caption, script, or post here... (Ctrl+G for grammar, Ctrl+Enter to convert)"
                 />
@@ -857,8 +928,9 @@ Post:
               <div className={`panel ${successPulse ? "success-pulse" : ""}`}>
                 <div className="panel-header">
                   <h2 className="panel-title">🎵 Your Audio</h2>
+                  <span className="panel-meta">{formatDuration(audioDuration)}</span>
                 </div>
-                <audio ref={audioRef} controls src={audioUrl} className="audio-player" />
+                <audio ref={audioRef} controls src={audioUrl} className="audio-player" onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration)} />
                 <a href={audioUrl} download="voice-post.wav" className="btn btn-secondary btn-block">
                   ⬇️ Download Audio
                 </a>
@@ -873,10 +945,10 @@ Post:
               </div>
               <div className="voice-grid">
                 {VOICE_STYLES.map((v) => (
-                  <div key={v.id} className={`voice-card ${styleId === v.id ? "active" : ""}`} onClick={() => setStyleId(v.id)}>
+                  <button key={v.id} className={`voice-card ${styleId === v.id ? "active" : ""}`} onClick={() => setStyleId(v.id)} type="button" aria-pressed={styleId === v.id}>
                     <div className="voice-icon">{v.icon}</div>
                     {v.label}
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -887,9 +959,9 @@ Post:
               </div>
               <div className="voice-grid">
                 {LANGUAGES.map((l) => (
-                  <div key={l.id} className={`voice-card ${languageId === l.id ? "active" : ""}`} onClick={() => setLanguageId(l.id)}>
+                  <button key={l.id} className={`voice-card ${languageId === l.id ? "active" : ""}`} onClick={() => setLanguageId(l.id)} type="button" aria-pressed={languageId === l.id}>
                     {l.label}
-                  </div>
+                  </button>
                 ))}
               </div>
               {activeLanguage.translate && <p className="hint">📌 Text will auto-translate to {activeLanguage.name}</p>}
@@ -913,6 +985,7 @@ Post:
               <button className="btn btn-secondary btn-block" onClick={convertToVoice} disabled={converting}>
                 {converting ? "⏳ Generating..." : "🎙️ Convert to Voice"}
               </button>
+              {converting && <p className="generation-status" aria-live="polite">Creating your audio—this may take a moment.</p>}
               <p className="hint" style={{ textAlign: "center", marginTop: 10 }}>
                 💡 Ctrl+G for grammar • Ctrl+Enter to convert
               </p>
