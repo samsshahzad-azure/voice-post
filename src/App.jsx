@@ -15,6 +15,13 @@ const LANGUAGES = [
   { id: "ja-JP", label: "🇯🇵 Japanese", code: "ja-JP", translate: true, name: "Japanese" },
 ];
 
+const SAMPLE_TEXTS = [
+  "Just launched our new product! It's going to change everything. Check it out and let me know what you think! 🚀",
+  "Morning coffee thoughts: Life is too short for boring ideas. Dream big, work hard, and make it happen.",
+  "Thank you everyone for 100K followers! This journey has been amazing. Here's to 1M! 🎉",
+  "Quick reminder: Your success is measured by the problems you solve, not the mistakes you make.",
+];
+
 const DEFAULT_TEXT_MODEL = "gemini-3.6-flash";
 const DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
@@ -64,6 +71,8 @@ html, body, #root { width: 100%; min-height: 100%; }
   --accent-2: #b366ff;
   --glow: rgba(0, 217, 255, 0.2);
   --glow-2: rgba(179, 102, 255, 0.15);
+  --success: #1dd1a1;
+  --success-glow: rgba(29, 209, 161, 0.2);
 }
 
 html, body, #root {
@@ -106,6 +115,14 @@ body {
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; box-shadow: 0 0 20px var(--glow), inset 0 0 10px rgba(0,217,255,0.4); }
   50% { opacity: 0.5; box-shadow: 0 0 40px var(--glow), inset 0 0 5px rgba(0,217,255,0.2); }
+}
+
+.success-pulse {
+  animation: success-burst 0.6s ease-out;
+}
+@keyframes success-burst {
+  0% { transform: scale(0.8); opacity: 1; filter: drop-shadow(0 0 20px var(--success-glow)); }
+  100% { transform: scale(1.1); opacity: 0; filter: drop-shadow(0 0 0px transparent); }
 }
 
 .title-section h1 {
@@ -254,6 +271,40 @@ textarea.editor:focus {
   background: rgba(0, 217, 255, 0.02);
 }
 
+.input-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.recording-status {
+  font-size: 0.8rem;
+  color: #ff6b6b;
+  font-weight: 600;
+  animation: pulse-text 1s ease-in-out infinite;
+}
+@keyframes pulse-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sample-text-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  background: rgba(179, 102, 255, 0.1);
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.sample-text-btn:hover {
+  background: rgba(179, 102, 255, 0.2);
+  box-shadow: 0 0 15px var(--glow-2);
+}
+
 .btn {
   border: none;
   border-radius: 10px;
@@ -265,6 +316,9 @@ textarea.editor:focus {
   font-family: inherit;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn:active { transform: scale(0.95); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -300,30 +354,13 @@ textarea.editor:focus {
   background: rgba(0, 217, 255, 0.05);
 }
 
-.btn-block { width: 100%; }
+.btn-small {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+}
 
-.input-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.recording-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #ff8f9b;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-.recording-status::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff6464;
-  box-shadow: 0 0 10px rgba(255, 100, 100, 0.8);
-  animation: pulse-glow 1s ease-in-out infinite;
-}
+.btn-block { width: 100%; }
 
 .error-box {
   background: rgba(255, 100, 100, 0.1);
@@ -349,6 +386,24 @@ textarea.editor:focus {
   border-radius: 10px;
   font-size: 0.9rem;
   margin-bottom: 1.2rem;
+}
+
+.copy-feedback {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--success);
+  color: #000;
+  padding: 0.8rem 1.2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  animation: slide-up 0.4s ease-out;
+  z-index: 999;
+}
+@keyframes slide-up {
+  from { transform: translateY(100px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .issues-list { margin-top: 1.2rem; }
@@ -458,6 +513,25 @@ textarea.editor:focus {
   50% { height: 50px; }
 }
 
+.voice-input-waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 40px;
+  margin: 0.5rem 0;
+}
+.voice-wave-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: #ff6b6b;
+  animation: voice-bounce 0.6s ease-in-out infinite;
+}
+@keyframes voice-bounce {
+  0%, 100% { height: 4px; }
+  50% { height: 30px; }
+}
+
 .hint { font-size: 0.8rem; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
 
 .footer {
@@ -474,20 +548,22 @@ textarea.editor:focus {
   .main-grid { grid-template-columns: 1fr; }
   .voice-grid { grid-template-columns: 1fr; }
   .settings-content { grid-template-columns: 1fr; }
+  .input-actions { flex-direction: column; }
+  .input-actions > * { width: 100%; }
 }
 `;
 
 const BARS = [12, 28, 18, 35, 20, 40, 16, 32, 22, 38, 14, 30];
 
 export default function VoicePostPro() {
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("voiceStudio_apiKey") || "");
   const [textModel, setTextModel] = useState(DEFAULT_TEXT_MODEL);
   const [ttsModel, setTtsModel] = useState(DEFAULT_TTS_MODEL);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [text, setText] = useState("");
-  const [styleId, setStyleId] = useState(VOICE_STYLES[0].id);
-  const [languageId, setLanguageId] = useState(LANGUAGES[0].id);
+  const [styleId, setStyleId] = useState("warm");
+  const [languageId, setLanguageId] = useState("en-US");
   const [youthful, setYouthful] = useState(false);
 
   const [checking, setChecking] = useState(false);
@@ -495,56 +571,90 @@ export default function VoicePostPro() {
 
   const [converting, setConverting] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
+  const [successPulse, setSuccessPulse] = useState(false);
 
   const [error, setError] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState("");
   const audioRef = useRef(null);
+
+  const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
 
   const activeStyle = VOICE_STYLES.find((v) => v.id === styleId);
   const activeLanguage = LANGUAGES.find((l) => l.id === languageId);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
 
+  // Save API key to localStorage
   useEffect(() => {
-    return () => recognitionRef.current?.stop();
-  }, []);
+    localStorage.setItem("voiceStudio_apiKey", apiKey);
+  }, [apiKey]);
 
-  const toggleVoiceInput = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      return;
-    }
-
+  // Initialize speech recognition
+  useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError("Voice input is not supported in this browser. Please use Chrome or Edge.");
-      return;
-    }
+    if (!SpeechRecognition) return;
 
-    setError("");
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = activeLanguage.translate ? "en-US" : activeLanguage.code;
-    const startingText = text.trim();
+    recognition.lang = "en-US";
 
     recognition.onresult = (event) => {
-      let transcript = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        transcript += event.results[i][0].transcript;
+      let finalChunk = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalChunk += transcript + " ";
       }
-      setText([startingText, transcript.trim()].filter(Boolean).join(startingText && transcript.trim() ? " " : ""));
-      setGrammarResult(null);
-      setAudioUrl(null);
+      if (finalChunk) setText((prev) => (prev + " " + finalChunk).trim());
     };
-    recognition.onerror = (event) => {
-      if (event.error !== "aborted") setError(`Voice input error: ${event.error}.`);
+
+    recognition.onend = () => {
+      if (isRecording) {
+        try { recognition.start(); } catch (e) {}
+      }
     };
-    recognition.onend = () => setIsRecording(false);
 
     recognitionRef.current = recognition;
-    recognition.start();
-    setIsRecording(true);
+    return () => { recognition.onend = null; recognition.stop(); };
+  }, [isRecording]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "g") {
+        e.preventDefault();
+        checkGrammar();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        convertToVoice();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [text, apiKey, styleId, languageId, youthful]);
+
+  const toggleVoiceInput = () => {
+    if (isRecording) {
+      setIsRecording(false);
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+    } else {
+      setIsRecording(true);
+      try { recognitionRef.current.start(); } catch (e) {}
+    }
+  };
+
+  const insertSampleText = () => {
+    const sample = SAMPLE_TEXTS[Math.floor(Math.random() * SAMPLE_TEXTS.length)];
+    setText(sample);
+  };
+
+  const clearAll = () => {
+    setText("");
+    setGrammarResult(null);
+    setAudioUrl(null);
+    setError("");
   };
 
   const callGemini = async (model, body) => {
@@ -594,6 +704,14 @@ Post:
     }
   };
 
+  const copyToClipboard = () => {
+    if (grammarResult?.corrected_text) {
+      navigator.clipboard.writeText(grammarResult.corrected_text);
+      setCopyFeedback("✓ Copied to clipboard!");
+      setTimeout(() => setCopyFeedback(""), 2000);
+    }
+  };
+
   const convertToVoice = async () => {
     if (!apiKey.trim()) return setError("Enter your Gemini API key in settings.");
     if (!text.trim()) return setError("Write some content first.");
@@ -622,7 +740,10 @@ Post:
       const part = data?.candidates?.[0]?.content?.parts?.[0];
       const base64 = part?.inlineData?.data || part?.inline_data?.data;
       if (!base64) throw new Error("No audio returned from the model.");
-      setAudioUrl(URL.createObjectURL(pcmToWavBlob(base64)));
+      const url = URL.createObjectURL(pcmToWavBlob(base64));
+      setAudioUrl(url);
+      setSuccessPulse(true);
+      setTimeout(() => setSuccessPulse(false), 600);
     } catch (e) {
       setError(e.message || "Voice conversion failed.");
     } finally {
@@ -651,7 +772,7 @@ Post:
           <div className="settings-content">
             <div className="input-group">
               <label>API Key</label>
-              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste Gemini key (session only)" />
+              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste Gemini key (saved locally)" />
             </div>
             <div className="input-group">
               <label>Text Model</label>
@@ -665,6 +786,7 @@ Post:
         </div>
 
         {error && <div className="error-box">⚠️ {error}</div>}
+        {copyFeedback && <div className="copy-feedback">{copyFeedback}</div>}
 
         <div className="main-grid">
           <div>
@@ -683,7 +805,7 @@ Post:
                     setGrammarResult(null);
                     setAudioUrl(null);
                   }}
-                  placeholder="Write your caption, script, or post here..."
+                  placeholder="Write your caption, script, or post here... (Ctrl+G for grammar, Ctrl+Enter to convert)"
                 />
               </div>
               <div className="input-actions">
@@ -691,10 +813,24 @@ Post:
                   {checking ? "✓ Checking..." : "🔍 Check Grammar"}
                 </button>
                 <button className="btn btn-ghost" onClick={toggleVoiceInput} type="button">
-                  {isRecording ? "⏹ Stop recording" : "🎙️ Speak your caption"}
+                  {isRecording ? "⏹ Stop recording" : "🎙️ Speak"}
                 </button>
-                {isRecording && <span className="recording-status">Listening… speak now</span>}
+                <button className="btn btn-ghost btn-small" onClick={insertSampleText}>
+                  📋 Sample
+                </button>
+                <button className="btn btn-ghost btn-small" onClick={clearAll}>
+                  🗑️ Clear
+                </button>
+                {isRecording && <span className="recording-status">Listening…</span>}
               </div>
+
+              {isRecording && (
+                <div className="voice-input-waveform">
+                  {[...Array(8)].map((_, i) => (
+                    <span key={i} className="voice-wave-bar" style={{ animationDelay: `${i * 0.08}s` }} />
+                  ))}
+                </div>
+              )}
 
               {grammarResult && grammarResult.has_errors && (
                 <div className="issues-list">
@@ -704,16 +840,21 @@ Post:
                       <div className="issue-reason">{issue.explanation}</div>
                     </div>
                   ))}
-                  <button className="btn btn-ghost" onClick={applyCorrected} style={{ marginTop: 10 }}>
-                    Apply Corrections
-                  </button>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button className="btn btn-ghost" onClick={applyCorrected}>
+                      Apply Corrections
+                    </button>
+                    <button className="btn btn-ghost btn-small" onClick={copyToClipboard}>
+                      📋 Copy
+                    </button>
+                  </div>
                 </div>
               )}
               {grammarResult && !grammarResult.has_errors && <div className="success-box">✓ No grammar issues found!</div>}
             </div>
 
             {audioUrl && (
-              <div className="panel">
+              <div className={`panel ${successPulse ? "success-pulse" : ""}`}>
                 <div className="panel-header">
                   <h2 className="panel-title">🎵 Your Audio</h2>
                 </div>
@@ -772,11 +913,14 @@ Post:
               <button className="btn btn-secondary btn-block" onClick={convertToVoice} disabled={converting}>
                 {converting ? "⏳ Generating..." : "🎙️ Convert to Voice"}
               </button>
+              <p className="hint" style={{ textAlign: "center", marginTop: 10 }}>
+                💡 Ctrl+G for grammar • Ctrl+Enter to convert
+              </p>
             </div>
           </div>
         </div>
 
-        <div className="footer">Your API key is never stored — it's kept in this browser session only.</div>
+        <div className="footer">Your API key is saved locally in your browser. Never shared or stored elsewhere.</div>
       </div>
     </div>
   );
