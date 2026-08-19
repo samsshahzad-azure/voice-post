@@ -25,12 +25,19 @@ const SAMPLE_TEXTS = [
 const DEFAULT_TEXT_MODEL = "gemini-3.6-flash";
 const DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts";
 const MAX_TEXT_LENGTH = 2000;
+const MAX_TTS_LENGTH = 1000;
+const TTS_CHUNK_LENGTH = 240;
+const REQUEST_TIMEOUT_MS = 60000;
 
-function pcmToWavBlob(base64Pcm, sampleRate = 24000) {
+function base64PcmToBytes(base64Pcm) {
   const binary = atob(base64Pcm);
   const len = binary.length;
   const pcmBytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) pcmBytes[i] = binary.charCodeAt(i);
+  return pcmBytes;
+}
+
+function pcmBytesToWavBlob(pcmBytes, sampleRate = 24000) {
   const numChannels = 1;
   const bitsPerSample = 16;
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
@@ -55,6 +62,46 @@ function pcmToWavBlob(base64Pcm, sampleRate = 24000) {
   view.setUint32(40, pcmBytes.length, true);
   new Uint8Array(buffer, 44).set(pcmBytes);
   return new Blob([buffer], { type: "audio/wav" });
+}
+
+function splitTextForTts(text, maxLength = TTS_CHUNK_LENGTH) {
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+  const chunks = [];
+  let currentChunk = "";
+
+  for (const sentence of sentences) {
+    const trimmedSentence = sentence.trim();
+    if (!trimmedSentence) continue;
+    if (trimmedSentence.length > maxLength) {
+      const words = trimmedSentence.split(/\s+/);
+      for (const word of words) {
+        if ((currentChunk + " " + word).trim().length > maxLength && currentChunk) {
+          chunks.push(currentChunk);
+          currentChunk = word;
+        } else {
+          currentChunk = `${currentChunk} ${word}`.trim();
+        }
+      }
+    } else if ((currentChunk + " " + trimmedSentence).trim().length > maxLength && currentChunk) {
+      chunks.push(currentChunk);
+      currentChunk = trimmedSentence;
+    } else {
+      currentChunk = `${currentChunk} ${trimmedSentence}`.trim();
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk);
+  return chunks;
+}
+
+function combinePcmChunks(pcmChunks) {
+  const totalLength = pcmChunks.reduce((total, chunk) => total + chunk.length, 0);
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of pcmChunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return combined;
 }
 
 const CSS = `
@@ -457,12 +504,39 @@ textarea.editor:focus {
   border-radius: 10px;
   accent-color: var(--accent);
 }
-.generation-status {
-  margin-top: 12px;
+.generation-note {
+  margin-top: 8px;
   text-align: center;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+.processing-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
   color: var(--accent);
   font-size: 0.85rem;
   font-weight: 600;
+}
+.processing-equalizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+}
+.processing-equalizer span {
+  width: 4px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  animation: processing-bounce 0.7s ease-in-out infinite;
+}
+@keyframes processing-bounce {
+  0%, 100% { height: 6px; opacity: 0.45; }
+  50% { height: 26px; opacity: 1; }
 }
 
 .toggle-group {
@@ -581,6 +655,7 @@ export default function VoicePostPro() {
   const [grammarResult, setGrammarResult] = useState(null);
 
   const [converting, setConverting] = useState(false);
+  const [generationSegmentCount, setGenerationSegmentCount] = useState(0);
   const [audioUrl, setAudioUrl] = useState(null);
   const [audioDuration, setAudioDuration] = useState(0);
   const [successPulse, setSuccessPulse] = useState(false);
@@ -696,16 +771,27 @@ export default function VoicePostPro() {
     setError("");
   };
 
-  const callGemini = async (model, body) => {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-    );
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody?.error?.message || `Request failed (${res.status})`);
+  const callGemini = async (model, body, timeoutMs = REQUEST_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal }
+      );
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || `Request failed (${res.status})`);
+      }
+      return res.json();
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("The request took more than 60 seconds. Please try again, or shorten the text.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    return res.json();
   };
 
   const checkGrammar = async () => {
@@ -762,11 +848,14 @@ Post:
   };
 
   const convertToVoice = async () => {
+    if (converting) return;
     if (!apiKey.trim()) return setError("Enter your Gemini API key in settings.");
     if (!text.trim()) return setError("Write some content first.");
+    if (text.length > MAX_TTS_LENGTH) return setError(`For faster audio generation, keep each conversion under ${MAX_TTS_LENGTH} characters.`);
     setError("");
     setConverting(true);
     setAudioUrl(null);
+    setGenerationSegmentCount(0);
     try {
       let speakText = text.trim();
       if (activeLanguage.translate) {
@@ -776,20 +865,27 @@ Post:
         speakText = translateData?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("").trim() || speakText;
       }
       const toneInstruction = youthful ? "Say in a bright, playful, higher-energy, youthful voice, with light and bouncy delivery" : activeStyle.instruction;
-      const data = await callGemini(ttsModel, {
-        contents: [{ parts: [{ text: `${toneInstruction}: ${speakText}` }] }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            languageCode: activeLanguage.code,
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: activeStyle.voice } },
+      const textChunks = splitTextForTts(speakText);
+      setGenerationSegmentCount(textChunks.length);
+      const audioResponses = await Promise.all(textChunks.map((chunk) =>
+        callGemini(ttsModel, {
+          contents: [{ parts: [{ text: `${toneInstruction}. Speak only this text: ${chunk}` }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              languageCode: activeLanguage.code,
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: activeStyle.voice } },
+            },
           },
-        },
+        })
+      ));
+      const pcmChunks = audioResponses.map((data) => {
+        const part = data?.candidates?.[0]?.content?.parts?.[0];
+        const base64 = part?.inlineData?.data || part?.inline_data?.data;
+        if (!base64) throw new Error("No audio returned from the model.");
+        return base64PcmToBytes(base64);
       });
-      const part = data?.candidates?.[0]?.content?.parts?.[0];
-      const base64 = part?.inlineData?.data || part?.inline_data?.data;
-      if (!base64) throw new Error("No audio returned from the model.");
-      const url = URL.createObjectURL(pcmToWavBlob(base64));
+      const url = URL.createObjectURL(pcmBytesToWavBlob(combinePcmChunks(pcmChunks)));
       setAudioUrl(url);
       setAudioDuration(0);
       setSuccessPulse(true);
@@ -798,6 +894,7 @@ Post:
       setError(e.message || "Voice conversion failed.");
     } finally {
       setConverting(false);
+      setGenerationSegmentCount(0);
     }
   };
 
@@ -982,10 +1079,18 @@ Post:
                   <span key={i} className={`wave-bar ${converting ? "active" : "idle"}`} style={converting ? { animationDelay: `${i * 0.05}s` } : { height: h / 2 }} />
                 ))}
               </div>
-              <button className="btn btn-secondary btn-block" onClick={convertToVoice} disabled={converting}>
+              <button className="btn btn-secondary btn-block" onClick={convertToVoice} disabled={converting || text.length > MAX_TTS_LENGTH}>
                 {converting ? "⏳ Generating..." : "🎙️ Convert to Voice"}
               </button>
-              {converting && <p className="generation-status" aria-live="polite">Creating your audio—this may take a moment.</p>}
+              {converting && (
+                <div className="processing-indicator" role="status" aria-live="polite">
+                  <div className="processing-equalizer" aria-hidden="true">
+                    {BARS.map((_, index) => <span key={index} style={{ animationDelay: `${index * 0.08}s` }} />)}
+                  </div>
+                  <span>Generating {generationSegmentCount || 1} audio part{generationSegmentCount === 1 ? "" : "s"}…</span>
+                </div>
+              )}
+              <p className="generation-note">For the fastest result, convert up to {MAX_TTS_LENGTH.toLocaleString()} characters at a time.</p>
               <p className="hint" style={{ textAlign: "center", marginTop: 10 }}>
                 💡 Ctrl+G for grammar • Ctrl+Enter to convert
               </p>
